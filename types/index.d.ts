@@ -33,7 +33,7 @@ interface Media {
     mediaSuccess: () => void,
     mediaError?: (error: MediaError) => any,
     mediaStatus?: (status: number) => void
-  );
+  ): Media;
 
   /**
    * Returns the current amplitude within an audio file.
