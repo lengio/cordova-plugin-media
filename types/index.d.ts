@@ -28,6 +28,13 @@ declare var Media: {
  * W3C specification and may deprecate the current APIs.
  */
 interface Media {
+  constructor(
+    src: string,
+    mediaSuccess: () => void,
+    mediaError?: (error: MediaError) => any,
+    mediaStatus?: (status: number) => void
+  );
+
   /**
    * Returns the current amplitude within an audio file.
    * @param mediaSuccess The callback that is passed the current amplitude (0.0 - 1.0).
