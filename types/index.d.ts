@@ -28,7 +28,7 @@ declare var Media: {
  * W3C specification and may deprecate the current APIs.
  */
 interface Media {
-  constructor(
+  new (
     src: string,
     mediaSuccess: () => void,
     mediaError?: (error: MediaError) => any,
