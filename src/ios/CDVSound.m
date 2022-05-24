@@ -30,7 +30,7 @@
 BOOL keepAvAudioSessionAlwaysActive = NO;
 
 // If YES, fall back to the old approach of using AVPlayer instead of AVAudioPlayer
-#define FORCE_LEGACY_PLAYERS YES;
+#define FORCE_LEGACY_PLAYERS YES
 
 @synthesize soundCache, avSession, currMediaId, statusCallbackId;
 
