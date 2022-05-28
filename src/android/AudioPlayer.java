@@ -171,7 +171,7 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
             this.recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
             this.recorder.setAudioChannels(1);
             this.recorder.setAudioSamplingRate(44100);
-            this.recorder.setAudioEncodingBitRate(32000);
+            this.recorder.setAudioEncodingBitRate(192000);
             this.tempFile = createAudioFilePath(null);
             this.recorder.setOutputFile(this.tempFile);
             try {
