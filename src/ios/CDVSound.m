@@ -913,6 +913,9 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
 {
   // Will be called when playback stalls due to buffer empty
   NSLog(@"Stalled playback");
+  NSString* errMsg = @"stalled_playback";
+  NSString* mediaId = self.currMediaId;
+  [self onStatus:MEDIA_ERROR mediaId:mediaId param:[self createAbortError:errMsg]];
 }
 
 - (void)onMemoryWarning
