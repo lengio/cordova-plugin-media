@@ -168,7 +168,7 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
             this.recorder = new MediaRecorder();
             this.recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
             this.recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
-            this.recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+            this.recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_WB);
             this.recorder.setAudioChannels(1);
             this.recorder.setAudioSamplingRate(44100);
             this.recorder.setAudioEncodingBitRate(192000);
@@ -777,7 +777,7 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
     /**
      * Set the playback rate for the player (ignored on API < 23)
      *
-     * @param volume
+     * @param rate
      */
     public void setRate(float rate) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
