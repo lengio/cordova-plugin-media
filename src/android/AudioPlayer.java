@@ -170,8 +170,8 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
             this.recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
             this.recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_WB);
             this.recorder.setAudioChannels(1);
-            this.recorder.setAudioSamplingRate(44100);
-            this.recorder.setAudioEncodingBitRate(192000);
+            this.recorder.setAudioSamplingRate(16000);
+            this.recorder.setAudioEncodingBitRate(23850); // 23.85 kbps, per the AMR-WB spec
             this.tempFile = createAudioFilePath(null);
             this.recorder.setOutputFile(this.tempFile);
             try {
