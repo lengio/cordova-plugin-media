@@ -11,7 +11,8 @@ declare var Media: {
     src: string,
     mediaSuccess: () => void,
     mediaError?: (error: MediaError) => any,
-    mediaStatus?: (status: number) => void
+    mediaStatus?: (status: number) => void,
+    durationUpdate?: (duration: number) => void
   ): Media;
   //Media statuses
   MEDIA_NONE: number;
@@ -32,7 +33,8 @@ interface Media {
     src: string,
     mediaSuccess: () => void,
     mediaError?: (error: MediaError) => any,
-    mediaStatus?: (status: number) => void
+    mediaStatus?: (status: number) => void,
+    durationUpdate?: (duration: number) => void
   ): Media;
 
   /**
