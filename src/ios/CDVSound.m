@@ -772,7 +772,7 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
         audioSettings[AVLinearPCMIsBigEndianKey] = @(false);
         audioSettings[AVLinearPCMIsFloatKey] = @(false);
       } else {
-        audioSettings[AVFormatIDKey] = @(kAudioFormatAMR);
+        audioSettings[AVFormatIDKey] = @(kAudioFormatMPEG4AAC);
         audioSettings[AVEncoderAudioQualityKey] = @(AVAudioQualityLow);
       }
       audioFile.recorder = [[CDVAudioRecorder alloc] initWithURL:audioFile.resourceURL
