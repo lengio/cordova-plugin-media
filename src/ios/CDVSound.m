@@ -763,7 +763,7 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
       // create a new recorder for each start record
       bool isWav = [[audioFile.resourcePath pathExtension] isEqualToString:@"wav"];
       NSMutableDictionary *audioSettings = [NSMutableDictionary dictionaryWithDictionary:@{
-        AVSampleRateKey : @(44100),
+        AVSampleRateKey : @(8000),
         AVNumberOfChannelsKey : @(1),
       }];
       if (isWav) {
@@ -772,7 +772,7 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
         audioSettings[AVLinearPCMIsBigEndianKey] = @(false);
         audioSettings[AVLinearPCMIsFloatKey] = @(false);
       } else {
-        audioSettings[AVFormatIDKey] = @(kAudioFormatMPEG4AAC);
+        audioSettings[AVFormatIDKey] = @(kAudioFormatAMR);
         audioSettings[AVEncoderAudioQualityKey] = @(AVAudioQualityLow);
       }
       audioFile.recorder = [[CDVAudioRecorder alloc] initWithURL:audioFile.resourceURL
