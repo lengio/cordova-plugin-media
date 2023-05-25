@@ -36,9 +36,7 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
 
 - (void)pluginInitialize
 {
-  NSLog(@"------- CDVSound: pluginInitialize test 1");
   self.soundOperationLock = [[NSLock alloc] init];
-  NSLog(@"------- CDVSound: pluginInitialize, soundOperationLock: %@", self.soundOperationLock);
 
   NSDictionary *settings = self.commandDelegate.settings;
   keepAvAudioSessionAlwaysActive =
@@ -389,7 +387,6 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
 - (void)startPlayingAudio:(CDVInvokedUrlCommand *)command
 {
   [self.commandDelegate runInBackground:^{
-    NSLog(@"------- CDVSound: soundOperationLock, %@", self.soundOperationLock);
     [self.soundOperationLock lock];
     NSString *callbackId = command.callbackId;
 #pragma unused(callbackId)
@@ -566,7 +563,6 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
 
 - (void)stopPlayingAudio:(CDVInvokedUrlCommand *)command
 {
-  NSLog(@"------- CDVSound: soundOperationLock, %@", self.soundOperationLock);
   [self.soundOperationLock lock];
   NSString *mediaId = [command argumentAtIndex:0];
   CDVAudioFile *audioFile = [[self soundCache] objectForKey:mediaId];
@@ -622,7 +618,6 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
 
 - (void)seekToAudio:(CDVInvokedUrlCommand *)command
 {
-  NSLog(@"------- CDVSound: soundOperationLock, %@", self.soundOperationLock);
   [self.soundOperationLock lock];
   // args:
   // 0 = Media id
@@ -684,7 +679,6 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
 
 - (void)release:(CDVInvokedUrlCommand *)command
 {
-  NSLog(@"------- CDVSound: soundOperationLock, %@", self.soundOperationLock);
   [self.soundOperationLock lock];
   NSString *mediaId = [command argumentAtIndex:0];
   // NSString* mediaId = self.currMediaId;
@@ -740,7 +734,6 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
 
 - (void)startRecordingAudio:(CDVInvokedUrlCommand *)command
 {
-  NSLog(@"------- CDVSound: soundOperationLock, %@", self.soundOperationLock);
   [self.soundOperationLock lock];
   NSString *callbackId = command.callbackId;
 #pragma unused(callbackId)
@@ -863,7 +856,6 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
 
 - (void)stopRecordingAudio:(CDVInvokedUrlCommand *)command
 {
-  NSLog(@"------- CDVSound: soundOperationLock, %@", self.soundOperationLock);
   [self.soundOperationLock lock];
   NSString *mediaId = [command argumentAtIndex:0];
 
@@ -943,7 +935,6 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
 
 - (void)onMemoryWarning
 {
-  NSLog(@"------- CDVSound: soundOperationLock, %@", self.soundOperationLock);
   [self.soundOperationLock lock];
   /* https://issues.apache.org/jira/browse/CB-11513 */
   NSMutableArray *keysToRemove = [[NSMutableArray alloc] init];
@@ -977,7 +968,6 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
 
 - (void)onReset
 {
-  NSLog(@"------- CDVSound: soundOperationLock, %@", self.soundOperationLock);
   [self.soundOperationLock lock];
   for (CDVAudioFile *audioFile in [[self soundCache] allValues]) {
     if (audioFile != nil) {
@@ -997,7 +987,6 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
 
 - (void)getCurrentAmplitudeAudio:(CDVInvokedUrlCommand *)command
 {
-  NSLog(@"------- CDVSound: soundOperationLock, %@", self.soundOperationLock);
   [self.soundOperationLock lock];
   NSString *callbackId = command.callbackId;
   NSString *mediaId = [command argumentAtIndex:0];
