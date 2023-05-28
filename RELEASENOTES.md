@@ -20,6 +20,10 @@
 -->
 # Release Notes
 
+### 7.0.0 (May 28, 2023)
+
+* bumping major version number to represent Slang-specific updates made in this fork
+
 ### 6.0.0 (May 25, 2022)
 
 * [GH-344](https://github.com/apache/cordova-plugin-media/pull/344) feat(android): drop `WRITE_EXTERNAL_STORAGE` permission

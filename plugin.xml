@@ -21,7 +21,7 @@
 <plugin xmlns="http://apache.org/cordova/ns/plugins/1.0"
     xmlns:android="http://schemas.android.com/apk/res/android"
     id="cordova-plugin-media"
-    version="6.0.0">
+    version="7.0.0">
 
     <name>Media</name>
     <description>Cordova Media Plugin</description>
@@ -47,8 +47,8 @@
     <!-- android -->
     <platform name="android">
         <config-file target="res/xml/config.xml" parent="/*">
-            <feature name="Media" >
-                <param name="android-package" value="org.apache.cordova.media.AudioHandler"/>
+            <feature name="Media">
+                <param name="android-package" value="org.apache.cordova.media.AudioHandler" />
             </feature>
         </config-file>
 
@@ -64,14 +64,14 @@
 
     <!-- ios -->
     <platform name="ios">
-      <preference name="KEEP_AVAUDIOSESSION_ALWAYS_ACTIVE" default="NO" />
+        <preference name="KEEP_AVAUDIOSESSION_ALWAYS_ACTIVE" default="NO" />
         <config-file target="config.xml" parent="/*">
             <feature name="Media">
                 <param name="ios-package" value="CDVSound" />
             </feature>
             <preference
-              name="KeepAVAudioSessionAlwaysActive"
-              value="$KEEP_AVAUDIOSESSION_ALWAYS_ACTIVE" />
+                name="KeepAVAudioSessionAlwaysActive"
+                value="$KEEP_AVAUDIOSESSION_ALWAYS_ACTIVE" />
         </config-file>
         <header-file src="src/ios/CDVSound.h" />
         <source-file src="src/ios/CDVSound.m" />
