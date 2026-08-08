@@ -190,6 +190,11 @@ public class AudioHandler extends CordovaPlugin {
             callbackContext.sendPluginResult(new PluginResult(status, f));
             return true;
         }
+        else if (action.equals("getRecordingMetadataAudio")) {
+            JSONObject metadata = this.getRecordingMetadataAudio(args.getString(0));
+            callbackContext.sendPluginResult(new PluginResult(status, metadata));
+            return true;
+        }
         else if (action.equals("setRate")) {
             this.setRate(args.getString(0), Float.parseFloat(args.getString(1)));
             return true;
@@ -600,5 +605,15 @@ public class AudioHandler extends CordovaPlugin {
             return (audio.getCurrentAmplitude());
         }
         return 0;
+    }
+
+    /**
+     * Get metadata for the active recording configuration.
+     * @param id                The id of the audio player
+     * @return                  Recording metadata
+     */
+    public JSONObject getRecordingMetadataAudio(String id) {
+        AudioPlayer audio = this.players.get(id);
+        return audio == null ? new JSONObject() : audio.getRecordingMetadata();
     }
 }

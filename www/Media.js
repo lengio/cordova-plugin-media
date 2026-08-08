@@ -166,6 +166,13 @@ Media.prototype.startRecord = function () {
 };
 
 /**
+ * Get metadata for the active recording configuration.
+ */
+Media.prototype.getRecordingMetadata = function (success, fail) {
+  exec(success, fail, "Media", "getRecordingMetadataAudio", [this.id]);
+};
+
+/**
  * Stop recording audio file.
  */
 Media.prototype.stopRecord = function () {

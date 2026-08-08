@@ -424,6 +424,7 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
           NSString *sessionCategory = bPlayAudioWhenScreenIsLocked
                                           ? AVAudioSessionCategoryPlayback
                                           : AVAudioSessionCategorySoloAmbient;
+          [self.avSession setMode:AVAudioSessionModeDefault error:&err];
           [self.avSession setCategory:sessionCategory error:&err];
           if (![self.avSession setActive:YES error:&err]) {
             // other audio with higher priority that does not allow mixing could
@@ -762,6 +763,16 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
           [weakSelf.avSession setCategory:AVAudioSessionCategoryRecord error:nil];
         }
 
+        NSError *sessionError = nil;
+        if (![weakSelf.avSession setMode:AVAudioSessionModeMeasurement error:&sessionError]) {
+          NSLog(@"Unable to enable measurement mode: %@", [sessionError localizedFailureReason]);
+        }
+        sessionError = nil;
+        if (![weakSelf.avSession setPreferredSampleRate:48000 error:&sessionError]) {
+          NSLog(@"Unable to set preferred recording sample rate: %@",
+                [sessionError localizedFailureReason]);
+        }
+
         if (![weakSelf.avSession setActive:YES error:&error]) {
           // other audio with higher priority that does not allow mixing could
           // cause this to fail
@@ -775,7 +786,7 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
       // create a new recorder for each start record
       bool isWav = [[audioFile.resourcePath pathExtension] isEqualToString:@"wav"];
       NSMutableDictionary *audioSettings = [NSMutableDictionary dictionaryWithDictionary:@{
-        AVSampleRateKey : @(16000),
+        AVSampleRateKey : @(48000),
         AVNumberOfChannelsKey : @(1),
       }];
       if (isWav) {
@@ -785,7 +796,8 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
         audioSettings[AVLinearPCMIsFloatKey] = @(false);
       } else {
         audioSettings[AVFormatIDKey] = @(kAudioFormatMPEG4AAC);
-        audioSettings[AVEncoderAudioQualityKey] = @(AVAudioQualityLow);
+        audioSettings[AVEncoderAudioQualityKey] = @(AVAudioQualityHigh);
+        audioSettings[AVEncoderBitRateKey] = @(64000);
       }
       audioFile.recorder = [[CDVAudioRecorder alloc] initWithURL:audioFile.resourceURL
                                                         settings:audioSettings
@@ -1016,6 +1028,41 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
                                               messageAsDouble:amplitude];
   [self.commandDelegate sendPluginResult:result callbackId:callbackId];
   [self.soundOperationLock unlock];
+}
+
+- (void)getRecordingMetadataAudio:(CDVInvokedUrlCommand *)command
+{
+  NSMutableDictionary *observed = [NSMutableDictionary dictionaryWithDictionary:@{
+    @"audio_session_mode" : self.avSession.mode ?: @"unknown",
+    @"os_version" : [[NSProcessInfo processInfo] operatingSystemVersionString],
+  }];
+  AVAudioSessionPortDescription *input = self.avSession.currentRoute.inputs.firstObject;
+  if (input.portType != nil) {
+    observed[@"audio_route"] = input.portType;
+  }
+
+  NSDictionary *metadata = @{
+    @"schema_version" : @1,
+    @"capture_profile" : @"assessment-v2",
+    @"platform" : @"ios",
+    @"mime_type" : @"audio/mp4",
+    @"requested" : @{
+      @"container" : @"mp4",
+      @"codec" : @"aac-lc",
+      @"sample_rate_hz" : @48000,
+      @"channel_count" : @1,
+      @"bit_rate_bps" : @64000,
+    },
+    @"observed" : observed,
+    @"dsp_flags" : @{
+      @"echo_cancellation" : @"unknown",
+      @"noise_suppression" : @"unknown",
+      @"auto_gain_control" : @"unknown",
+    },
+  };
+  CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK
+                                         messageAsDictionary:metadata];
+  [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
 }
 
 - (void)resumeRecordingAudio:(CDVInvokedUrlCommand *)command

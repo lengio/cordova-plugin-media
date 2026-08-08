@@ -46,6 +46,11 @@ interface Media {
     mediaSuccess: (amplitude: number) => void,
     mediaError?: (error: MediaError) => void
   ): void;
+  /** Returns metadata for the active recording configuration. */
+  getRecordingMetadata(
+    mediaSuccess: (metadata: RecordingMetadata) => void,
+    mediaError?: (error: MediaError) => void
+  ): void;
   /**
    * Returns the current position within an audio file. Also updates the Media object's position parameter.
    * @param mediaSuccess The callback that is passed the current position in seconds.
@@ -93,6 +98,16 @@ interface Media {
   position: number;
   /** The duration of the media, in seconds. */
   duration: number;
+}
+
+interface RecordingMetadata {
+  schema_version: number;
+  capture_profile: string;
+  platform: string;
+  mime_type: string;
+  requested: Record<string, string | number | boolean>;
+  observed: Record<string, string | number | boolean>;
+  dsp_flags: Record<string, string | boolean>;
 }
 /**
  *  iOS optional parameters for media.play

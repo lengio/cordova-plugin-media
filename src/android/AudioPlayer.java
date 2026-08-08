@@ -65,6 +65,9 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
                       };
 
     private static final String LOG_TAG = "AudioPlayer";
+    private static final int ASSESSMENT_BIT_RATE_IN_BPS = 64000;
+    private static final int ASSESSMENT_CHANNEL_COUNT = 1;
+    private static final int ASSESSMENT_SAMPLE_RATE_IN_HZ = 48000;
 
     // AudioPlayer message ids
     private static int MEDIA_STATE = 1;
@@ -91,6 +94,7 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
     private MediaRecorder recorder = null;  // Audio recording object
     private LinkedList<String> tempFiles = null; // Temporary recording file name
     private String tempFile = null;
+    private JSONObject recordingMetadata = new JSONObject();
 
     private MediaPlayer player = null;      // Audio player object
     private boolean prepareOnly = true;     // playback after file prepare flag
@@ -165,24 +169,20 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
             break;
         case NONE:
             this.audioFile = file;
-            this.recorder = new MediaRecorder();
-            this.recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
-            this.recorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP);
-            this.recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB);
-            this.recorder.setAudioChannels(1);
-            // this.recorder.setAudioSamplingRate(16000);
-            // this.recorder.setAudioEncodingBitRate(96000);
             this.tempFile = createAudioFilePath(null);
-            this.recorder.setOutputFile(this.tempFile);
-            try {
-                this.recorder.prepare();
-                this.recorder.start();
+            boolean supportsUnprocessed = supportsUnprocessedAudioSource();
+            int assessmentSource = supportsUnprocessed
+                ? MediaRecorder.AudioSource.UNPROCESSED
+                : MediaRecorder.AudioSource.VOICE_RECOGNITION;
+            if (startRecorder(false, assessmentSource, supportsUnprocessed)
+                    || (supportsUnprocessed && startRecorder(
+                        false,
+                        MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                        supportsUnprocessed
+                    ))
+                    || startRecorder(true, MediaRecorder.AudioSource.MIC, supportsUnprocessed)) {
                 this.setState(STATE.MEDIA_RUNNING);
                 return;
-            } catch (IllegalStateException e) {
-                e.printStackTrace();
-            } catch (IOException e) {
-                e.printStackTrace();
             }
 
             sendErrorStatus(MEDIA_ERR_ABORTED);
@@ -191,6 +191,90 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
             LOG.d(LOG_TAG, "AudioPlayer Error: Already recording.");
             sendErrorStatus(MEDIA_ERR_ABORTED);
         }
+    }
+
+    private boolean startRecorder(boolean legacy, int audioSource, boolean supportsUnprocessed) {
+        try {
+            this.recorder = new MediaRecorder();
+            this.recorder.setAudioSource(audioSource);
+            this.recorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP);
+            this.recorder.setAudioEncoder(legacy
+                ? MediaRecorder.AudioEncoder.AMR_NB
+                : MediaRecorder.AudioEncoder.AAC);
+            this.recorder.setAudioChannels(ASSESSMENT_CHANNEL_COUNT);
+            if (!legacy) {
+                this.recorder.setAudioSamplingRate(ASSESSMENT_SAMPLE_RATE_IN_HZ);
+                this.recorder.setAudioEncodingBitRate(ASSESSMENT_BIT_RATE_IN_BPS);
+            }
+            this.recorder.setOutputFile(this.tempFile);
+            this.recorder.prepare();
+            this.recorder.start();
+            this.recordingMetadata = buildRecordingMetadata(legacy, audioSource, supportsUnprocessed);
+            return true;
+        } catch (IOException | RuntimeException e) {
+            LOG.w(LOG_TAG, "Unable to start " + (legacy ? "legacy" : "assessment") + " recording", e);
+            if (this.recorder != null) {
+                this.recorder.release();
+            }
+            this.recorder = null;
+            return false;
+        }
+    }
+
+    private boolean supportsUnprocessedAudioSource() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            return false;
+        }
+        AudioManager manager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+        return manager != null && "true".equalsIgnoreCase(
+            manager.getProperty(AudioManager.PROPERTY_SUPPORT_AUDIO_SOURCE_UNPROCESSED)
+        );
+    }
+
+    private JSONObject buildRecordingMetadata(boolean legacy, int audioSource, boolean supportsUnprocessed) {
+        JSONObject metadata = new JSONObject();
+        JSONObject requested = new JSONObject();
+        JSONObject observed = new JSONObject();
+        JSONObject dspFlags = new JSONObject();
+        try {
+            metadata.put("schema_version", 1);
+            metadata.put("capture_profile", legacy ? "legacy-fallback" : "assessment-v2");
+            metadata.put("platform", "android");
+            metadata.put("mime_type", "audio/3gpp");
+            requested.put("container", "3gp");
+            requested.put("codec", legacy ? "amr-nb" : "aac-lc");
+            requested.put("sample_rate_hz", legacy ? 8000 : ASSESSMENT_SAMPLE_RATE_IN_HZ);
+            requested.put("channel_count", ASSESSMENT_CHANNEL_COUNT);
+            if (!legacy) {
+                requested.put("bit_rate_bps", ASSESSMENT_BIT_RATE_IN_BPS);
+            }
+            observed.put("audio_source", audioSourceName(audioSource));
+            observed.put("supports_unprocessed", supportsUnprocessed);
+            observed.put("os_version", Build.VERSION.RELEASE);
+            dspFlags.put("echo_cancellation", "unknown");
+            dspFlags.put("noise_suppression", "unknown");
+            dspFlags.put("auto_gain_control", "unknown");
+            metadata.put("requested", requested);
+            metadata.put("observed", observed);
+            metadata.put("dsp_flags", dspFlags);
+        } catch (JSONException e) {
+            LOG.e(LOG_TAG, "Unable to create recording metadata", e);
+        }
+        return metadata;
+    }
+
+    private String audioSourceName(int audioSource) {
+        if (audioSource == MediaRecorder.AudioSource.UNPROCESSED) {
+            return "unprocessed";
+        }
+        if (audioSource == MediaRecorder.AudioSource.VOICE_RECOGNITION) {
+            return "voice_recognition";
+        }
+        return "mic";
+    }
+
+    public JSONObject getRecordingMetadata() {
+        return this.recordingMetadata;
     }
 
     /**

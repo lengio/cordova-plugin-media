@@ -164,6 +164,13 @@ exports.defineAutoTests = function () {
             media1.release();
         });
 
+        it('media.spec.11.1 should contain a getRecordingMetadata function', function () {
+            var media1 = new Media('dummy');
+            expect(media1.getRecordingMetadata).toBeDefined();
+            expect(typeof media1.getRecordingMetadata).toBe('function');
+            media1.release();
+        });
+
         it('media.spec.12 should contain a stopRecord function', function () {
             var media1 = new Media('dummy');
             expect(media1.stopRecord).toBeDefined();
