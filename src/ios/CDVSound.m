@@ -25,6 +25,14 @@
 #define HTTPS_SCHEME_PREFIX @"https://"
 #define CDVFILE_PREFIX @"cdvfile://"
 
+#define CAPTURE_METADATA_SCHEMA_VERSION 2
+#define ASSESSMENT_BIT_RATE_IN_BPS 64000
+#define ASSESSMENT_CHANNEL_COUNT 1
+#define ASSESSMENT_SAMPLE_RATE_IN_HZ 48000
+
+/** The level reported for digital silence, in decibels relative to full scale */
+#define SILENT_LEVEL_IN_DBFS -100.0f
+
 @implementation CDVSound
 
 BOOL keepAvAudioSessionAlwaysActive = NO;
@@ -768,7 +776,8 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
           NSLog(@"Unable to enable measurement mode: %@", [sessionError localizedFailureReason]);
         }
         sessionError = nil;
-        if (![weakSelf.avSession setPreferredSampleRate:48000 error:&sessionError]) {
+        if (![weakSelf.avSession setPreferredSampleRate:ASSESSMENT_SAMPLE_RATE_IN_HZ
+                                                  error:&sessionError]) {
           NSLog(@"Unable to set preferred recording sample rate: %@",
                 [sessionError localizedFailureReason]);
         }
@@ -786,8 +795,8 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
       // create a new recorder for each start record
       bool isWav = [[audioFile.resourcePath pathExtension] isEqualToString:@"wav"];
       NSMutableDictionary *audioSettings = [NSMutableDictionary dictionaryWithDictionary:@{
-        AVSampleRateKey : @(48000),
-        AVNumberOfChannelsKey : @(1),
+        AVSampleRateKey : @(ASSESSMENT_SAMPLE_RATE_IN_HZ),
+        AVNumberOfChannelsKey : @(ASSESSMENT_CHANNEL_COUNT),
       }];
       if (isWav) {
         audioSettings[AVFormatIDKey] = @(kAudioFormatLinearPCM);
@@ -797,8 +806,9 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
       } else {
         audioSettings[AVFormatIDKey] = @(kAudioFormatMPEG4AAC);
         audioSettings[AVEncoderAudioQualityKey] = @(AVAudioQualityHigh);
-        audioSettings[AVEncoderBitRateKey] = @(64000);
+        audioSettings[AVEncoderBitRateKey] = @(ASSESSMENT_BIT_RATE_IN_BPS);
       }
+      audioFile.recordingMetadata = nil;
       audioFile.recorder = [[CDVAudioRecorder alloc] initWithURL:audioFile.resourceURL
                                                         settings:audioSettings
                                                            error:&error];
@@ -811,6 +821,7 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
         recordingSuccess = [audioFile.recorder record];
         if (recordingSuccess) {
           NSLog(@"Started recording audio sample '%@'", audioFile.resourcePath);
+          audioFile.recordingMetadata = [weakSelf buildRecordingMetadata:audioFile isWav:isWav];
           [weakSelf onStatus:MEDIA_STATE mediaId:mediaId param:@(MEDIA_RUNNING)];
         }
       }
@@ -890,6 +901,12 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
   if (audioFile != nil) {
     NSLog(@"Finished recording audio sample '%@'", audioFile.resourcePath);
   }
+  // Recording puts the session into measurement mode, which also strips the processing from
+  // playback and can move it off the speaker. Hand the session back the way we found it.
+  if (self.avSession && ![self isPlayingOrRecording]) {
+    [self.avSession setMode:AVAudioSessionModeDefault error:nil];
+  }
+
   if (flag) {
     [self onStatus:MEDIA_STATE mediaId:mediaId param:@(MEDIA_STOPPED)];
   } else {
@@ -1030,36 +1047,80 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
   [self.soundOperationLock unlock];
 }
 
+- (void)getCurrentLevelAudio:(CDVInvokedUrlCommand *)command
+{
+  [self.soundOperationLock lock];
+  NSString *callbackId = command.callbackId;
+  NSString *mediaId = [command argumentAtIndex:0];
+
+  CDVAudioFile *audioFile = [[self soundCache] objectForKey:mediaId];
+  float level = SILENT_LEVEL_IN_DBFS;
+
+  if ((audioFile != nil) && (audioFile.recorder != nil) && [audioFile.recorder isRecording]) {
+    [audioFile.recorder updateMeters];
+    level = MIN(MAX([audioFile.recorder peakPowerForChannel:0], SILENT_LEVEL_IN_DBFS), 0.0f);
+  }
+
+  CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK
+                                              messageAsDouble:level];
+  [self.commandDelegate sendPluginResult:result callbackId:callbackId];
+  [self.soundOperationLock unlock];
+}
+
+/** Describe the capture configuration a just-started recording is actually using */
+- (NSDictionary *)buildRecordingMetadata:(CDVAudioFile *)audioFile isWav:(bool)isWav
+{
+  NSMutableDictionary *requested = [NSMutableDictionary dictionaryWithDictionary:@{
+    @"container" : isWav ? @"wav" : @"mp4",
+    @"codec" : isWav ? @"pcm-s16le" : @"aac-lc",
+    @"sample_rate_hz" : @(ASSESSMENT_SAMPLE_RATE_IN_HZ),
+    @"channel_count" : @(ASSESSMENT_CHANNEL_COUNT),
+  }];
+  if (!isWav) {
+    requested[@"bit_rate_bps"] = @(ASSESSMENT_BIT_RATE_IN_BPS);
+  }
+
+  return @{
+    @"schema_version" : @(CAPTURE_METADATA_SCHEMA_VERSION),
+    @"capture_profile" : isWav ? @"legacy-fallback" : @"assessment-v2",
+    @"metadata_source" : @"measured",
+    @"platform" : @"ios",
+    @"mime_type" : isWav ? @"audio/wav" : @"audio/mp4",
+    @"requested" : requested,
+  };
+}
+
 - (void)getRecordingMetadataAudio:(CDVInvokedUrlCommand *)command
 {
+  NSString *mediaId = [command argumentAtIndex:0];
+  CDVAudioFile *audioFile = [[self soundCache] objectForKey:mediaId];
+
+  // Measurement mode is the only way we can say anything definite about the input processing: it
+  // disables the platform's echo cancellation, noise suppression and gain control outright.
+  BOOL measuring = [self.avSession.mode isEqualToString:AVAudioSessionModeMeasurement];
   NSMutableDictionary *observed = [NSMutableDictionary dictionaryWithDictionary:@{
     @"audio_session_mode" : self.avSession.mode ?: @"unknown",
     @"os_version" : [[NSProcessInfo processInfo] operatingSystemVersionString],
   }];
+  if (self.avSession != nil) {
+    observed[@"sample_rate_hz"] = @(self.avSession.sampleRate);
+    observed[@"channel_count"] = @(self.avSession.inputNumberOfChannels);
+  }
   AVAudioSessionPortDescription *input = self.avSession.currentRoute.inputs.firstObject;
   if (input.portType != nil) {
     observed[@"audio_route"] = input.portType;
   }
 
-  NSDictionary *metadata = @{
-    @"schema_version" : @1,
-    @"capture_profile" : @"assessment-v2",
-    @"platform" : @"ios",
-    @"mime_type" : @"audio/mp4",
-    @"requested" : @{
-      @"container" : @"mp4",
-      @"codec" : @"aac-lc",
-      @"sample_rate_hz" : @48000,
-      @"channel_count" : @1,
-      @"bit_rate_bps" : @64000,
-    },
-    @"observed" : observed,
-    @"dsp_flags" : @{
-      @"echo_cancellation" : @"unknown",
-      @"noise_suppression" : @"unknown",
-      @"auto_gain_control" : @"unknown",
-    },
+  NSMutableDictionary *metadata = [NSMutableDictionary
+      dictionaryWithDictionary:audioFile.recordingMetadata ?: [self buildRecordingMetadata:audioFile
+                                                                                     isWav:NO]];
+  metadata[@"observed"] = observed;
+  metadata[@"dsp_flags"] = @{
+    @"echo_cancellation" : measuring ? @(NO) : @"unknown",
+    @"noise_suppression" : measuring ? @(NO) : @"unknown",
+    @"auto_gain_control" : measuring ? @(NO) : @"unknown",
   };
+
   CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK
                                          messageAsDictionary:metadata];
   [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];

@@ -68,6 +68,13 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
     private static final int ASSESSMENT_BIT_RATE_IN_BPS = 64000;
     private static final int ASSESSMENT_CHANNEL_COUNT = 1;
     private static final int ASSESSMENT_SAMPLE_RATE_IN_HZ = 48000;
+    private static final int CAPTURE_METADATA_SCHEMA_VERSION = 2;
+
+    /** The largest magnitude of a 16-bit PCM sample, i.e. full scale */
+    private static final int MAX_SAMPLE_AMPLITUDE = 32767;
+
+    /** The level reported for digital silence, in decibels relative to full scale */
+    private static final float SILENT_LEVEL_IN_DBFS = -100f;
 
     // AudioPlayer message ids
     private static int MEDIA_STATE = 1;
@@ -237,8 +244,9 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
         JSONObject observed = new JSONObject();
         JSONObject dspFlags = new JSONObject();
         try {
-            metadata.put("schema_version", 1);
+            metadata.put("schema_version", CAPTURE_METADATA_SCHEMA_VERSION);
             metadata.put("capture_profile", legacy ? "legacy-fallback" : "assessment-v2");
+            metadata.put("metadata_source", "measured");
             metadata.put("platform", "android");
             metadata.put("mime_type", "audio/3gpp");
             requested.put("container", "3gp");
@@ -251,9 +259,13 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
             observed.put("audio_source", audioSourceName(audioSource));
             observed.put("supports_unprocessed", supportsUnprocessed);
             observed.put("os_version", Build.VERSION.RELEASE);
-            dspFlags.put("echo_cancellation", "unknown");
-            dspFlags.put("noise_suppression", "unknown");
-            dspFlags.put("auto_gain_control", "unknown");
+            // `UNPROCESSED` guarantees the platform applies no signal processing; `VOICE_RECOGNITION`
+            // only guarantees that automatic gain control is off. Anything else is up to the device.
+            boolean unprocessed = audioSource == MediaRecorder.AudioSource.UNPROCESSED;
+            boolean voiceRecognition = audioSource == MediaRecorder.AudioSource.VOICE_RECOGNITION;
+            dspFlags.put("echo_cancellation", unprocessed ? false : "unknown");
+            dspFlags.put("noise_suppression", unprocessed ? false : "unknown");
+            dspFlags.put("auto_gain_control", unprocessed || voiceRecognition ? false : "unknown");
             metadata.put("requested", requested);
             metadata.put("observed", observed);
             metadata.put("dsp_flags", dspFlags);
@@ -845,14 +857,36 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
      * @return amplitude or 0 if not recording
      */
     public float getCurrentAmplitude() {
-        if (this.recorder != null) {
-            try{
-                if (this.state == STATE.MEDIA_RUNNING) {
-                    return (float) this.recorder.getMaxAmplitude() / 32762;
-                }
+        return (float) this.getPeakSampleAmplitude() / MAX_SAMPLE_AMPLITUDE;
+    }
+
+    /**
+     * Get the peak level of the recording since this was last called, in decibels relative to full
+     * scale.
+     *
+     * This is the cross-platform level unit: iOS and the web recorder report the same quantity, so
+     * the same display calibration and silence thresholds apply everywhere.
+     *
+     * @return the peak level in dBFS, or `SILENT_LEVEL_IN_DBFS` if not recording
+     */
+    public float getCurrentLevel() {
+        int peak = this.getPeakSampleAmplitude();
+        if (peak <= 0) {
+            return SILENT_LEVEL_IN_DBFS;
+        }
+
+        double level = 20.0 * Math.log10((double) peak / MAX_SAMPLE_AMPLITUDE);
+        return (float) Math.max(Math.min(level, 0.0), SILENT_LEVEL_IN_DBFS);
+    }
+
+    /** The peak 16-bit sample magnitude since this was last called, or 0 if not recording */
+    private int getPeakSampleAmplitude() {
+        if (this.recorder != null && this.state == STATE.MEDIA_RUNNING) {
+            try {
+                return this.recorder.getMaxAmplitude();
             }
             catch (Exception e) {
-                e.printStackTrace();
+                LOG.w(LOG_TAG, "Unable to read the current recording amplitude", e);
             }
         }
         return 0;

@@ -190,6 +190,11 @@ public class AudioHandler extends CordovaPlugin {
             callbackContext.sendPluginResult(new PluginResult(status, f));
             return true;
         }
+        else if (action.equals("getCurrentLevelAudio")) {
+            float f = this.getCurrentLevelAudio(args.getString(0));
+            callbackContext.sendPluginResult(new PluginResult(status, f));
+            return true;
+        }
         else if (action.equals("getRecordingMetadataAudio")) {
             JSONObject metadata = this.getRecordingMetadataAudio(args.getString(0));
             callbackContext.sendPluginResult(new PluginResult(status, metadata));
@@ -605,6 +610,19 @@ public class AudioHandler extends CordovaPlugin {
             return (audio.getCurrentAmplitude());
         }
         return 0;
+    }
+
+    /**
+     * Get the peak level of the recording since this was last called, in dBFS.
+     * @param id                The id of the audio player
+     * @return                  level in dBFS
+     */
+    public float getCurrentLevelAudio(String id) {
+        AudioPlayer audio = this.players.get(id);
+        if (audio != null) {
+            return (audio.getCurrentLevel());
+        }
+        return -100f;
     }
 
     /**

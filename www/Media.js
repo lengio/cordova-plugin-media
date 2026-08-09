@@ -166,6 +166,13 @@ Media.prototype.startRecord = function () {
 };
 
 /**
+ * Get the peak level of the recording since this was last called, in dBFS.
+ */
+Media.prototype.getCurrentLevel = function (success, fail) {
+  exec(success, fail, "Media", "getCurrentLevelAudio", [this.id]);
+};
+
+/**
  * Get metadata for the active recording configuration.
  */
 Media.prototype.getRecordingMetadata = function (success, fail) {

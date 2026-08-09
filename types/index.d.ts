@@ -46,6 +46,16 @@ interface Media {
     mediaSuccess: (amplitude: number) => void,
     mediaError?: (error: MediaError) => void
   ): void;
+  /**
+   * Returns the peak level of the recording since this was last called, in decibels relative to
+   * full scale (-100.0 - 0.0). This is the same quantity the web recorder reports.
+   * @param mediaSuccess The callback that is passed the current level in dBFS.
+   * @param mediaError   The callback to execute if an error occurs.
+   */
+  getCurrentLevel(
+    mediaSuccess: (level: number) => void,
+    mediaError?: (error: MediaError) => void
+  ): void;
   /** Returns metadata for the active recording configuration. */
   getRecordingMetadata(
     mediaSuccess: (metadata: RecordingMetadata) => void,
@@ -100,14 +110,32 @@ interface Media {
   duration: number;
 }
 
+interface RecordingDetails {
+  audio_route?: string;
+  audio_session_mode?: string;
+  audio_source?: string;
+  bit_rate_bps?: number;
+  channel_count?: number;
+  codec?: string;
+  container?: string;
+  os_version?: string;
+  sample_rate_hz?: number;
+  supports_unprocessed?: boolean;
+}
+
 interface RecordingMetadata {
   schema_version: number;
-  capture_profile: string;
-  platform: string;
+  capture_profile: "assessment-v2" | "legacy-fallback";
+  metadata_source: "measured";
+  platform: "ios" | "android";
   mime_type: string;
-  requested: Record<string, string | number | boolean>;
-  observed: Record<string, string | number | boolean>;
-  dsp_flags: Record<string, string | boolean>;
+  requested: RecordingDetails;
+  observed: RecordingDetails;
+  dsp_flags: {
+    auto_gain_control: boolean | "unknown";
+    echo_cancellation: boolean | "unknown";
+    noise_suppression: boolean | "unknown";
+  };
 }
 /**
  *  iOS optional parameters for media.play
@@ -118,4 +146,4 @@ interface IosPlayOptions {
   playAudioWhenScreenIsLocked?: boolean;
 }
 
-export { Media };
+export { Media, RecordingDetails, RecordingMetadata };

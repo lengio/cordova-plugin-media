@@ -71,6 +71,9 @@ typedef NSUInteger CDVMediaMsg;
 
 @property (nonatomic, strong) CDVAudioRecorder *recorder;
 
+/** The capture configuration of the recording in progress, captured when recording starts */
+@property (nonatomic, strong) NSDictionary *recordingMetadata;
+
 @end
 
 @interface CDVSound : CDVPlugin <AVAudioPlayerDelegate, AVAudioRecorderDelegate> {
@@ -117,6 +120,7 @@ typedef NSUInteger CDVMediaMsg;
 - (void)startRecordingAudio:(CDVInvokedUrlCommand *)command;
 - (void)stopRecordingAudio:(CDVInvokedUrlCommand *)command;
 - (void)getCurrentAmplitudeAudio:(CDVInvokedUrlCommand *)command;
+- (void)getCurrentLevelAudio:(CDVInvokedUrlCommand *)command;
 - (void)getRecordingMetadataAudio:(CDVInvokedUrlCommand *)command;
 
 - (void)setVolume:(CDVInvokedUrlCommand *)command;
