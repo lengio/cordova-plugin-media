@@ -794,9 +794,7 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
     void (^startRecording)(void) = ^{
       NSError *__autoreleasing error = nil;
 
-      // A recorder left ready by `prepareRecordingAudio` is exactly what we want; anything else
-      // is stale and gets rebuilt below.
-      if (audioFile.recorder != nil && !audioFile.recorderPrepared) {
+      if (audioFile.recorder != nil) {
         [audioFile.recorder stop];
         audioFile.recorder = nil;
       }
@@ -828,24 +826,14 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
         }
       }
 
+      // Built here rather than ahead of time, so it binds to a session already configured and
+      // activated for recording
       bool isWav = [[audioFile.resourcePath pathExtension] isEqualToString:@"wav"];
-      if (audioFile.recorder == nil) {
-        [weakSelf buildRecorderFor:audioFile withId:mediaId isWav:isWav error:&error];
-      }
+      [weakSelf buildRecorderFor:audioFile withId:mediaId isWav:isWav error:&error];
 
       bool recordingSuccess = NO;
       if (error == nil && audioFile.recorder != nil) {
         recordingSuccess = [audioFile.recorder record];
-
-        // A recorder readied before the session was configured for recording could in principle be
-        // refused once it is; rebuilding costs a moment but beats failing the user's recording.
-        if (!recordingSuccess && audioFile.recorderPrepared) {
-          NSLog(@"Prepared recorder refused to start; rebuilding");
-          [weakSelf buildRecorderFor:audioFile withId:mediaId isWav:isWav error:&error];
-          recordingSuccess = (error == nil) && [audioFile.recorder record];
-        }
-
-        audioFile.recorderPrepared = NO;
         if (recordingSuccess) {
           NSLog(@"Started recording audio sample '%@'", audioFile.resourcePath);
           audioFile.recordingMetadata = [weakSelf buildRecordingMetadata:audioFile isWav:isWav];
@@ -1096,7 +1084,6 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
   }
 
   audioFile.recordingMetadata = nil;
-  audioFile.recorderPrepared = NO;
   audioFile.recorder = [[CDVAudioRecorder alloc] initWithURL:audioFile.resourceURL
                                                     settings:audioSettings
                                                        error:error];
@@ -1111,38 +1098,19 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
 }
 
 /**
- * Build the recorder and let it allocate its file and buffers, without recording
+ * Nothing to do ahead of time on this platform
  *
- * This deliberately leaves the audio session alone. Activating a recording session is the part
- * that takes the audio route away from anything else that's playing and lights the system's
- * in-use indicator, so that stays on the user's actual tap; only the work that costs time without
- * touching the microphone moves here.
+ * An AVAudioRecorder binds to the audio session's input when it is created and prepared, so one
+ * built before the session has been switched to a recording category and activated ends up
+ * attached to the wrong input and captures nothing. Doing that setup early is exactly what we
+ * can't do here: activating a recording session takes the route away from whatever is playing and
+ * lights the system's in-use indicator, so it has to stay on the user's actual tap. That leaves
+ * nothing worth moving, and the recorder is built at `startRecordingAudio` instead.
  */
 - (void)prepareRecordingAudio:(CDVInvokedUrlCommand *)command
 {
-  [self.soundOperationLock lock];
-
-  NSString *mediaId = [command argumentAtIndex:0];
-  CDVAudioFile *audioFile = [self audioFileForResource:[command argumentAtIndex:1]
-                                                withId:mediaId
-                                          doValidation:YES
-                                          forRecording:YES];
-
-  if ((audioFile != nil) && (audioFile.resourceURL != nil) && (audioFile.recorder == nil)) {
-    NSError *__autoreleasing error = nil;
-    bool isWav = [[audioFile.resourcePath pathExtension] isEqualToString:@"wav"];
-    [self buildRecorderFor:audioFile withId:mediaId isWav:isWav error:&error];
-
-    if (error != nil) {
-      NSLog(@"Unable to prepare a recorder: %@", [error localizedFailureReason]);
-    } else {
-      audioFile.recorderPrepared = [audioFile.recorder prepareToRecord];
-    }
-  }
-
   [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK]
                               callbackId:command.callbackId];
-  [self.soundOperationLock unlock];
 }
 
 - (void)getCurrentLevelAudio:(CDVInvokedUrlCommand *)command
@@ -1156,7 +1124,10 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
 
   if ((audioFile != nil) && (audioFile.recorder != nil) && [audioFile.recorder isRecording]) {
     [audioFile.recorder updateMeters];
-    level = MIN(MAX([audioFile.recorder peakPowerForChannel:0], SILENT_LEVEL_IN_DBFS), 0.0f);
+    // Average rather than peak power: the peak meter holds its maximum and eases back down, which
+    // smears a short sound across the following readings instead of showing it as the sharp thing
+    // it was. Average power is the level right now, which is what a waveform wants.
+    level = MIN(MAX([audioFile.recorder averagePowerForChannel:0], SILENT_LEVEL_IN_DBFS), 0.0f);
   }
 
   CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK

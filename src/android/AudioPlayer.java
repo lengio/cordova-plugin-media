@@ -77,6 +77,15 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
     /** The level reported for digital silence, in decibels relative to full scale */
     private static final float SILENT_LEVEL_IN_DBFS = -100f;
 
+    /**
+     * How far below its peak a speech signal's average level sits, in decibels
+     *
+     * `getMaxAmplitude` is the only meter Android gives us, but iOS and the web recorder both
+     * report an average level, and the display calibration and silence thresholds are shared. This
+     * is the usual crest factor for speech, applied so all three describe the same quantity.
+     */
+    private static final double SPEECH_CREST_FACTOR_IN_DB = 12.0;
+
     // AudioPlayer message ids
     private static int MEDIA_STATE = 1;
     private static int MEDIA_DURATION = 2;
@@ -963,13 +972,13 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
     }
 
     /**
-     * Get the peak level of the recording since this was last called, in decibels relative to full
-     * scale.
+     * Get the average level of the recording since this was last called, in decibels relative to
+     * full scale.
      *
      * This is the cross-platform level unit: iOS and the web recorder report the same quantity, so
      * the same display calibration and silence thresholds apply everywhere.
      *
-     * @return the peak level in dBFS, or `SILENT_LEVEL_IN_DBFS` if not recording
+     * @return the level in dBFS, or `SILENT_LEVEL_IN_DBFS` if not recording
      */
     public float getCurrentLevel() {
         int peak = this.getPeakSampleAmplitude();
@@ -977,7 +986,8 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
             return SILENT_LEVEL_IN_DBFS;
         }
 
-        double level = 20.0 * Math.log10((double) peak / MAX_SAMPLE_AMPLITUDE);
+        double level =
+            20.0 * Math.log10((double) peak / MAX_SAMPLE_AMPLITUDE) - SPEECH_CREST_FACTOR_IN_DB;
         return (float) Math.max(Math.min(level, 0.0), SILENT_LEVEL_IN_DBFS);
     }
 

@@ -47,13 +47,15 @@ interface Media {
     mediaError?: (error: MediaError) => void
   ): void;
   /**
-   * Configures the recorder ahead of time so that `startRecord` is quick. Does not touch the
-   * microphone or the audio session, so it is safe to call well before recording.
+   * Configures the recorder ahead of time so that `startRecord` is quick, where the platform
+   * allows it. Never touches the microphone or the audio session, so it is safe to call well
+   * before recording. Does nothing on iOS, where the recorder has to be built against an already
+   * active recording session.
    */
   prepareRecord(): void;
   /**
-   * Returns the peak level of the recording since this was last called, in decibels relative to
-   * full scale (-100.0 - 0.0). This is the same quantity the web recorder reports.
+   * Returns the average level of the recording since this was last called, in decibels relative
+   * to full scale (-100.0 - 0.0). This is the same quantity the web recorder reports.
    * @param mediaSuccess The callback that is passed the current level in dBFS.
    * @param mediaError   The callback to execute if an error occurs.
    */
@@ -118,8 +120,8 @@ interface Media {
 interface RecordingDetails {
   audio_route?: string;
   audio_session_mode?: string;
-  available_inputs?: string;
   audio_source?: string;
+  available_inputs?: string;
   bit_rate_bps?: number;
   channel_count?: number;
   codec?: string;

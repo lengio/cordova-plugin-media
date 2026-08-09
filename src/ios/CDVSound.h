@@ -74,9 +74,6 @@ typedef NSUInteger CDVMediaMsg;
 /** The capture configuration of the recording in progress, captured when recording starts */
 @property (nonatomic, strong) NSDictionary *recordingMetadata;
 
-/** Whether `recorder` is one we readied ahead of time and can start directly */
-@property (nonatomic, assign) BOOL recorderPrepared;
-
 @end
 
 @interface CDVSound : CDVPlugin <AVAudioPlayerDelegate, AVAudioRecorderDelegate> {
