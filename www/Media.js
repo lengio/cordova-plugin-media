@@ -166,6 +166,13 @@ Media.prototype.startRecord = function () {
 };
 
 /**
+ * Configure the recorder ahead of time so that startRecord is quick.
+ */
+Media.prototype.prepareRecord = function () {
+  exec(null, this.errorCallback, "Media", "prepareRecordingAudio", [this.id, this.src]);
+};
+
+/**
  * Get the peak level of the recording since this was last called, in dBFS.
  */
 Media.prototype.getCurrentLevel = function (success, fail) {

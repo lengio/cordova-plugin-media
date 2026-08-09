@@ -19,6 +19,7 @@
 package org.apache.cordova.media;
 
 import android.content.Context;
+import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.media.MediaPlayer.OnCompletionListener;
@@ -103,6 +104,12 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
     private String tempFile = null;
     private JSONObject recordingMetadata = new JSONObject();
 
+    // The configuration the prepared recorder settled on, for reporting once it's running
+    private boolean recorderPrepared = false;
+    private boolean preparedLegacy = false;
+    private boolean preparedSupportsUnprocessed = false;
+    private int preparedAudioSource = MediaRecorder.AudioSource.MIC;
+
     private MediaPlayer player = null;      // Audio player object
     private boolean prepareOnly = true;     // playback after file prepare flag
     private int seekOnPrepared = 0;     // seek to this location once media is prepared
@@ -164,6 +171,33 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
     }
 
     /**
+     * Configure the recorder so that only `start` is left to do.
+     *
+     * Encoder setup and file creation are the slow part of beginning a recording, and none of it
+     * touches the microphone: capture only begins at `start`. Doing this ahead of the user's tap is
+     * what keeps the gap between tapping record and audio actually arriving short.
+     *
+     * @param file              The name of the file
+     */
+    public void prepareRecording(String file) {
+        if (this.mode == MODE.PLAY || this.recorderPrepared) {
+            return;
+        }
+
+        this.audioFile = file;
+        this.tempFile = createAudioFilePath(null);
+        this.preparedSupportsUnprocessed = supportsUnprocessedAudioSource();
+        int assessmentSource = this.preparedSupportsUnprocessed
+            ? MediaRecorder.AudioSource.UNPROCESSED
+            : MediaRecorder.AudioSource.VOICE_RECOGNITION;
+
+        this.recorderPrepared = prepareRecorder(false, assessmentSource)
+            || (this.preparedSupportsUnprocessed
+                && prepareRecorder(false, MediaRecorder.AudioSource.VOICE_RECOGNITION))
+            || prepareRecorder(true, MediaRecorder.AudioSource.MIC);
+    }
+
+    /**
      * Start recording the specified file.
      *
      * @param file              The name of the file
@@ -175,19 +209,8 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
             sendErrorStatus(MEDIA_ERR_ABORTED);
             break;
         case NONE:
-            this.audioFile = file;
-            this.tempFile = createAudioFilePath(null);
-            boolean supportsUnprocessed = supportsUnprocessedAudioSource();
-            int assessmentSource = supportsUnprocessed
-                ? MediaRecorder.AudioSource.UNPROCESSED
-                : MediaRecorder.AudioSource.VOICE_RECOGNITION;
-            if (startRecorder(false, assessmentSource, supportsUnprocessed)
-                    || (supportsUnprocessed && startRecorder(
-                        false,
-                        MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                        supportsUnprocessed
-                    ))
-                    || startRecorder(true, MediaRecorder.AudioSource.MIC, supportsUnprocessed)) {
+            this.prepareRecording(file);
+            if (this.recorderPrepared && startPreparedRecorder()) {
                 this.setState(STATE.MEDIA_RUNNING);
                 return;
             }
@@ -200,7 +223,7 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
         }
     }
 
-    private boolean startRecorder(boolean legacy, int audioSource, boolean supportsUnprocessed) {
+    private boolean prepareRecorder(boolean legacy, int audioSource) {
         try {
             this.recorder = new MediaRecorder();
             this.recorder.setAudioSource(audioSource);
@@ -213,19 +236,40 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
                 this.recorder.setAudioSamplingRate(ASSESSMENT_SAMPLE_RATE_IN_HZ);
                 this.recorder.setAudioEncodingBitRate(ASSESSMENT_BIT_RATE_IN_BPS);
             }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                // Keep other apps from capturing the same input while we're assessing pronunciation
+                this.recorder.setPrivacySensitive(true);
+            }
             this.recorder.setOutputFile(this.tempFile);
             this.recorder.prepare();
-            this.recorder.start();
-            this.recordingMetadata = buildRecordingMetadata(legacy, audioSource, supportsUnprocessed);
+            this.preparedLegacy = legacy;
+            this.preparedAudioSource = audioSource;
             return true;
         } catch (IOException | RuntimeException e) {
-            LOG.w(LOG_TAG, "Unable to start " + (legacy ? "legacy" : "assessment") + " recording", e);
-            if (this.recorder != null) {
-                this.recorder.release();
-            }
-            this.recorder = null;
+            LOG.w(LOG_TAG, "Unable to prepare " + (legacy ? "legacy" : "assessment") + " recording", e);
+            this.releaseRecorder();
             return false;
         }
+    }
+
+    private boolean startPreparedRecorder() {
+        try {
+            this.recorder.start();
+            this.recordingMetadata = buildRecordingMetadata();
+            return true;
+        } catch (RuntimeException e) {
+            LOG.w(LOG_TAG, "Unable to start the prepared recording", e);
+            this.releaseRecorder();
+            return false;
+        }
+    }
+
+    private void releaseRecorder() {
+        if (this.recorder != null) {
+            this.recorder.release();
+        }
+        this.recorder = null;
+        this.recorderPrepared = false;
     }
 
     private boolean supportsUnprocessedAudioSource() {
@@ -238,7 +282,56 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
         );
     }
 
-    private JSONObject buildRecordingMetadata(boolean legacy, int audioSource, boolean supportsUnprocessed) {
+    /** The input the recorder actually ended up on, once it's running */
+    private String routedDeviceName() {
+        if (this.recorder == null) {
+            return null;
+        }
+        AudioDeviceInfo device = this.recorder.getRoutedDevice();
+        return device == null ? null : audioDeviceTypeName(device.getType());
+    }
+
+    /**
+     * Every input the device could have used
+     *
+     * We never turn on Bluetooth SCO, so a paired headset's microphone is listed here but is not
+     * what we record from. That's deliberate, since SCO is narrowband and would undo the point of
+     * the assessment profile, but it means we need this to tell how often it happens.
+     */
+    private String availableInputNames() {
+        AudioManager manager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+        if (manager == null) {
+            return null;
+        }
+
+        StringBuilder names = new StringBuilder();
+        for (AudioDeviceInfo device : manager.getDevices(AudioManager.GET_DEVICES_INPUTS)) {
+            if (names.length() > 0) {
+                names.append(",");
+            }
+            names.append(audioDeviceTypeName(device.getType()));
+        }
+        return names.length() == 0 ? null : names.toString();
+    }
+
+    private String audioDeviceTypeName(int type) {
+        switch (type) {
+        case AudioDeviceInfo.TYPE_BUILTIN_MIC: return "builtin_mic";
+        case AudioDeviceInfo.TYPE_BLUETOOTH_SCO: return "bluetooth_sco";
+        case AudioDeviceInfo.TYPE_WIRED_HEADSET: return "wired_headset";
+        case AudioDeviceInfo.TYPE_USB_HEADSET: return "usb_headset";
+        case AudioDeviceInfo.TYPE_USB_DEVICE: return "usb_device";
+        case AudioDeviceInfo.TYPE_USB_ACCESSORY: return "usb_accessory";
+        case AudioDeviceInfo.TYPE_TELEPHONY: return "telephony";
+        case AudioDeviceInfo.TYPE_DOCK: return "dock";
+        default: return "type_" + type;
+        }
+    }
+
+    private JSONObject buildRecordingMetadata() {
+        boolean legacy = this.preparedLegacy;
+        int audioSource = this.preparedAudioSource;
+        boolean supportsUnprocessed = this.preparedSupportsUnprocessed;
         JSONObject metadata = new JSONObject();
         JSONObject requested = new JSONObject();
         JSONObject observed = new JSONObject();
@@ -259,6 +352,14 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
             observed.put("audio_source", audioSourceName(audioSource));
             observed.put("supports_unprocessed", supportsUnprocessed);
             observed.put("os_version", Build.VERSION.RELEASE);
+            String route = routedDeviceName();
+            if (route != null) {
+                observed.put("audio_route", route);
+            }
+            String availableInputs = availableInputNames();
+            if (availableInputs != null) {
+                observed.put("available_inputs", availableInputs);
+            }
             // `UNPROCESSED` guarantees the platform applies no signal processing; `VOICE_RECOGNITION`
             // only guarantees that automatic gain control is off. Anything else is up to the device.
             boolean unprocessed = audioSource == MediaRecorder.AudioSource.UNPROCESSED;
@@ -411,6 +512,7 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
                     this.recorder.stop();
                 }
                 this.recorder.reset();
+                this.recorderPrepared = false;
                 if (!this.tempFiles.contains(this.tempFile)) {
                     this.tempFiles.add(this.tempFile);
                 }

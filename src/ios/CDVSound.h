@@ -74,6 +74,9 @@ typedef NSUInteger CDVMediaMsg;
 /** The capture configuration of the recording in progress, captured when recording starts */
 @property (nonatomic, strong) NSDictionary *recordingMetadata;
 
+/** Whether `recorder` is one we readied ahead of time and can start directly */
+@property (nonatomic, assign) BOOL recorderPrepared;
+
 @end
 
 @interface CDVSound : CDVPlugin <AVAudioPlayerDelegate, AVAudioRecorderDelegate> {
@@ -117,6 +120,7 @@ typedef NSUInteger CDVMediaMsg;
 - (BOOL)prepareToPlay:(CDVAudioFile *)audioFile withId:(NSString *)mediaId;
 - (NSDictionary *)createMediaErrorWithCode:(CDVMediaError)code message:(NSString *)message;
 
+- (void)prepareRecordingAudio:(CDVInvokedUrlCommand *)command;
 - (void)startRecordingAudio:(CDVInvokedUrlCommand *)command;
 - (void)stopRecordingAudio:(CDVInvokedUrlCommand *)command;
 - (void)getCurrentAmplitudeAudio:(CDVInvokedUrlCommand *)command;

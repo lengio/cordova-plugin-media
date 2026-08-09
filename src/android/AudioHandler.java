@@ -190,6 +190,9 @@ public class AudioHandler extends CordovaPlugin {
             callbackContext.sendPluginResult(new PluginResult(status, f));
             return true;
         }
+        else if (action.equals("prepareRecordingAudio")) {
+            this.prepareRecordingAudio(args.getString(0), args.getString(1));
+        }
         else if (action.equals("getCurrentLevelAudio")) {
             float f = this.getCurrentLevelAudio(args.getString(0));
             callbackContext.sendPluginResult(new PluginResult(status, f));
@@ -310,6 +313,16 @@ public class AudioHandler extends CordovaPlugin {
     public void startRecordingAudio(String id, String file) {
         AudioPlayer audio = getOrCreatePlayer(id, file);
         audio.startRecording(file);
+    }
+
+    /**
+     * Configure the recorder ahead of time, so starting it later is quick.
+     * @param id                The id of the audio player
+     * @param file              The name of the file
+     */
+    public void prepareRecordingAudio(String id, String file) {
+        AudioPlayer audio = getOrCreatePlayer(id, file);
+        audio.prepareRecording(file);
     }
 
     /**

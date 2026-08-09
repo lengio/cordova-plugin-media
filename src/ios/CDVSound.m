@@ -46,6 +46,11 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
 {
   self.soundOperationLock = [[NSLock alloc] init];
 
+  [[NSNotificationCenter defaultCenter] addObserver:self
+                                           selector:@selector(handleAudioSessionInterruption:)
+                                               name:AVAudioSessionInterruptionNotification
+                                             object:nil];
+
   NSDictionary *settings = self.commandDelegate.settings;
   keepAvAudioSessionAlwaysActive =
       [[settings objectForKey:[@"KeepAVAudioSessionAlwaysActive" lowercaseString]] boolValue];
@@ -57,6 +62,35 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
       }
     }
   }
+}
+
+/**
+ * End a recording cleanly when the system takes the microphone away
+ *
+ * A call, an alarm or Siri interrupts the session without telling the web layer, which would
+ * otherwise sit there showing a recording that stopped capturing. Stopping here runs the normal
+ * finish path, so whatever was captured up to the interruption is still handed back.
+ */
+- (void)handleAudioSessionInterruption:(NSNotification *)notification
+{
+  NSNumber *type = notification.userInfo[AVAudioSessionInterruptionTypeKey];
+  if (type.unsignedIntegerValue != AVAudioSessionInterruptionTypeBegan) {
+    return;
+  }
+
+  // This arrives on whatever thread the system feels like, so it takes the same lock every command
+  // does before going near the sound cache
+  [self.soundOperationLock lock];
+
+  for (NSString *mediaId in [[self soundCache] allKeys]) {
+    CDVAudioFile *audioFile = [[self soundCache] objectForKey:mediaId];
+    if (audioFile.recorder != nil && [audioFile.recorder isRecording]) {
+      NSLog(@"Interrupted while recording audio sample '%@'", audioFile.resourcePath);
+      [audioFile.recorder stop];
+    }
+  }
+
+  [self.soundOperationLock unlock];
 }
 
 // Maps a url for a resource path for recording
@@ -760,7 +794,9 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
     void (^startRecording)(void) = ^{
       NSError *__autoreleasing error = nil;
 
-      if (audioFile.recorder != nil) {
+      // A recorder left ready by `prepareRecordingAudio` is exactly what we want; anything else
+      // is stale and gets rebuilt below.
+      if (audioFile.recorder != nil && !audioFile.recorderPrepared) {
         [audioFile.recorder stop];
         audioFile.recorder = nil;
       }
@@ -792,33 +828,24 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
         }
       }
 
-      // create a new recorder for each start record
       bool isWav = [[audioFile.resourcePath pathExtension] isEqualToString:@"wav"];
-      NSMutableDictionary *audioSettings = [NSMutableDictionary dictionaryWithDictionary:@{
-        AVSampleRateKey : @(ASSESSMENT_SAMPLE_RATE_IN_HZ),
-        AVNumberOfChannelsKey : @(ASSESSMENT_CHANNEL_COUNT),
-      }];
-      if (isWav) {
-        audioSettings[AVFormatIDKey] = @(kAudioFormatLinearPCM);
-        audioSettings[AVLinearPCMBitDepthKey] = @(16);
-        audioSettings[AVLinearPCMIsBigEndianKey] = @(false);
-        audioSettings[AVLinearPCMIsFloatKey] = @(false);
-      } else {
-        audioSettings[AVFormatIDKey] = @(kAudioFormatMPEG4AAC);
-        audioSettings[AVEncoderAudioQualityKey] = @(AVAudioQualityHigh);
-        audioSettings[AVEncoderBitRateKey] = @(ASSESSMENT_BIT_RATE_IN_BPS);
+      if (audioFile.recorder == nil) {
+        [weakSelf buildRecorderFor:audioFile withId:mediaId isWav:isWav error:&error];
       }
-      audioFile.recordingMetadata = nil;
-      audioFile.recorder = [[CDVAudioRecorder alloc] initWithURL:audioFile.resourceURL
-                                                        settings:audioSettings
-                                                           error:&error];
 
       bool recordingSuccess = NO;
-      if (error == nil) {
-        audioFile.recorder.delegate = weakSelf;
-        audioFile.recorder.mediaId = mediaId;
-        audioFile.recorder.meteringEnabled = YES;
+      if (error == nil && audioFile.recorder != nil) {
         recordingSuccess = [audioFile.recorder record];
+
+        // A recorder readied before the session was configured for recording could in principle be
+        // refused once it is; rebuilding costs a moment but beats failing the user's recording.
+        if (!recordingSuccess && audioFile.recorderPrepared) {
+          NSLog(@"Prepared recorder refused to start; rebuilding");
+          [weakSelf buildRecorderFor:audioFile withId:mediaId isWav:isWav error:&error];
+          recordingSuccess = (error == nil) && [audioFile.recorder record];
+        }
+
+        audioFile.recorderPrepared = NO;
         if (recordingSuccess) {
           NSLog(@"Started recording audio sample '%@'", audioFile.resourcePath);
           audioFile.recordingMetadata = [weakSelf buildRecordingMetadata:audioFile isWav:isWav];
@@ -1047,6 +1074,77 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
   [self.soundOperationLock unlock];
 }
 
+/** Create the recorder for an audio file and get it ready to capture */
+- (void)buildRecorderFor:(CDVAudioFile *)audioFile
+                  withId:(NSString *)mediaId
+                   isWav:(bool)isWav
+                   error:(NSError *__autoreleasing *)error
+{
+  NSMutableDictionary *audioSettings = [NSMutableDictionary dictionaryWithDictionary:@{
+    AVSampleRateKey : @(ASSESSMENT_SAMPLE_RATE_IN_HZ),
+    AVNumberOfChannelsKey : @(ASSESSMENT_CHANNEL_COUNT),
+  }];
+  if (isWav) {
+    audioSettings[AVFormatIDKey] = @(kAudioFormatLinearPCM);
+    audioSettings[AVLinearPCMBitDepthKey] = @(16);
+    audioSettings[AVLinearPCMIsBigEndianKey] = @(false);
+    audioSettings[AVLinearPCMIsFloatKey] = @(false);
+  } else {
+    audioSettings[AVFormatIDKey] = @(kAudioFormatMPEG4AAC);
+    audioSettings[AVEncoderAudioQualityKey] = @(AVAudioQualityHigh);
+    audioSettings[AVEncoderBitRateKey] = @(ASSESSMENT_BIT_RATE_IN_BPS);
+  }
+
+  audioFile.recordingMetadata = nil;
+  audioFile.recorderPrepared = NO;
+  audioFile.recorder = [[CDVAudioRecorder alloc] initWithURL:audioFile.resourceURL
+                                                    settings:audioSettings
+                                                       error:error];
+  if (*error != nil) {
+    audioFile.recorder = nil;
+    return;
+  }
+
+  audioFile.recorder.delegate = self;
+  audioFile.recorder.mediaId = mediaId;
+  audioFile.recorder.meteringEnabled = YES;
+}
+
+/**
+ * Build the recorder and let it allocate its file and buffers, without recording
+ *
+ * This deliberately leaves the audio session alone. Activating a recording session is the part
+ * that takes the audio route away from anything else that's playing and lights the system's
+ * in-use indicator, so that stays on the user's actual tap; only the work that costs time without
+ * touching the microphone moves here.
+ */
+- (void)prepareRecordingAudio:(CDVInvokedUrlCommand *)command
+{
+  [self.soundOperationLock lock];
+
+  NSString *mediaId = [command argumentAtIndex:0];
+  CDVAudioFile *audioFile = [self audioFileForResource:[command argumentAtIndex:1]
+                                                withId:mediaId
+                                          doValidation:YES
+                                          forRecording:YES];
+
+  if ((audioFile != nil) && (audioFile.resourceURL != nil) && (audioFile.recorder == nil)) {
+    NSError *__autoreleasing error = nil;
+    bool isWav = [[audioFile.resourcePath pathExtension] isEqualToString:@"wav"];
+    [self buildRecorderFor:audioFile withId:mediaId isWav:isWav error:&error];
+
+    if (error != nil) {
+      NSLog(@"Unable to prepare a recorder: %@", [error localizedFailureReason]);
+    } else {
+      audioFile.recorderPrepared = [audioFile.recorder prepareToRecord];
+    }
+  }
+
+  [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK]
+                              callbackId:command.callbackId];
+  [self.soundOperationLock unlock];
+}
+
 - (void)getCurrentLevelAudio:(CDVInvokedUrlCommand *)command
 {
   [self.soundOperationLock lock];
@@ -1109,6 +1207,20 @@ BOOL keepAvAudioSessionAlwaysActive = NO;
   AVAudioSessionPortDescription *input = self.avSession.currentRoute.inputs.firstObject;
   if (input.portType != nil) {
     observed[@"audio_route"] = input.portType;
+  }
+
+  // The recording category is set without `allowBluetooth`, so a paired headset never becomes the
+  // route even when the system would otherwise default to it. That's on purpose, since Bluetooth
+  // input is narrowband and would undo the assessment profile, but the route alone can't tell us
+  // it happened: by the time we read it, it already says the built-in microphone.
+  NSMutableArray *availableInputs = [NSMutableArray array];
+  for (AVAudioSessionPortDescription *port in self.avSession.availableInputs) {
+    if (port.portType != nil) {
+      [availableInputs addObject:port.portType];
+    }
+  }
+  if (availableInputs.count > 0) {
+    observed[@"available_inputs"] = [availableInputs componentsJoinedByString:@","];
   }
 
   NSMutableDictionary *metadata = [NSMutableDictionary
