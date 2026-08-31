@@ -224,6 +224,15 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
                 return;
             }
 
+            // A recorder prepared earlier can go stale before the user taps, if audio focus moved
+            // or something else took the input in the meantime. Starting it fails and releases it,
+            // so build a fresh one and try once more rather than refusing the recording outright.
+            this.prepareRecording(file);
+            if (this.recorderPrepared && startPreparedRecorder()) {
+                this.setState(STATE.MEDIA_RUNNING);
+                return;
+            }
+
             sendErrorStatus(MEDIA_ERR_ABORTED);
             break;
         case RECORD:
@@ -246,8 +255,13 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
                 this.recorder.setAudioEncodingBitRate(ASSESSMENT_BIT_RATE_IN_BPS);
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                // Keep other apps from capturing the same input while we're assessing pronunciation
-                this.recorder.setPrivacySensitive(true);
+                try {
+                    // Keep other apps from capturing the same input while we assess pronunciation.
+                    // Nice to have, and not worth failing a recording over if a device refuses it.
+                    this.recorder.setPrivacySensitive(true);
+                } catch (RuntimeException e) {
+                    LOG.w(LOG_TAG, "Unable to mark the recording privacy sensitive", e);
+                }
             }
             this.recorder.setOutputFile(this.tempFile);
             this.recorder.prepare();
@@ -264,12 +278,35 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
     private boolean startPreparedRecorder() {
         try {
             this.recorder.start();
-            this.recordingMetadata = buildRecordingMetadata();
-            return true;
         } catch (RuntimeException e) {
             LOG.w(LOG_TAG, "Unable to start the prepared recording", e);
             this.releaseRecorder();
             return false;
+        }
+
+        // Once capture is running the recording has succeeded, whatever happens below. Describing
+        // it queries the device's audio routing, which OEMs do not all implement the same way, and
+        // letting that throw here would tear down a recording that had already started.
+        try {
+            this.recordingMetadata = buildRecordingMetadata();
+        } catch (RuntimeException e) {
+            LOG.w(LOG_TAG, "Unable to describe the recording", e);
+        }
+
+        return true;
+    }
+
+    /**
+     * Give up a recorder we readied but are not using
+     *
+     * Only one recorder can hold the microphone. An instance that prepared ahead of time has to
+     * stand aside for one the user is actually starting, or the second recorder on screen could
+     * never record at all.
+     */
+    public void releaseIdlePreparedRecorder() {
+        if (this.recorderPrepared && this.state != STATE.MEDIA_RUNNING) {
+            LOG.d(LOG_TAG, "Releasing an idle prepared recorder so another can record");
+            this.releaseRecorder();
         }
     }
 
@@ -296,8 +333,13 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
         if (this.recorder == null) {
             return null;
         }
-        AudioDeviceInfo device = this.recorder.getRoutedDevice();
-        return device == null ? null : audioDeviceTypeName(device.getType());
+        try {
+            AudioDeviceInfo device = this.recorder.getRoutedDevice();
+            return device == null ? null : audioDeviceTypeName(device.getType());
+        } catch (RuntimeException e) {
+            LOG.w(LOG_TAG, "Unable to read the routed input device", e);
+            return null;
+        }
     }
 
     /**
@@ -313,14 +355,19 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
             return null;
         }
 
-        StringBuilder names = new StringBuilder();
-        for (AudioDeviceInfo device : manager.getDevices(AudioManager.GET_DEVICES_INPUTS)) {
-            if (names.length() > 0) {
-                names.append(",");
+        try {
+            StringBuilder names = new StringBuilder();
+            for (AudioDeviceInfo device : manager.getDevices(AudioManager.GET_DEVICES_INPUTS)) {
+                if (names.length() > 0) {
+                    names.append(",");
+                }
+                names.append(audioDeviceTypeName(device.getType()));
             }
-            names.append(audioDeviceTypeName(device.getType()));
+            return names.length() == 0 ? null : names.toString();
+        } catch (RuntimeException e) {
+            LOG.w(LOG_TAG, "Unable to list the available input devices", e);
+            return null;
         }
-        return names.length() == 0 ? null : names.toString();
     }
 
     private String audioDeviceTypeName(int type) {

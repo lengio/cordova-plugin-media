@@ -41,6 +41,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.HashMap;
+import java.util.Map;
 
 /**
  * This class called by CordovaActivity to play and record audio.
@@ -312,6 +313,23 @@ public class AudioHandler extends CordovaPlugin {
      */
     public void startRecordingAudio(String id, String file) {
         AudioPlayer audio = getOrCreatePlayer(id, file);
+
+        // Any other recorder that readied itself ahead of time is still holding the microphone,
+        // and only one can have it. The one the user actually tapped wins.
+        //
+        // Commands arrive on a thread pool, so this map can be mutated from under the loop. Losing
+        // the race is survivable: the recording below just falls back to rebuilding its recorder.
+        try {
+            for (Map.Entry<String, AudioPlayer> player :
+                    new HashMap<String, AudioPlayer>(this.players).entrySet()) {
+                if (!player.getKey().equals(id)) {
+                    player.getValue().releaseIdlePreparedRecorder();
+                }
+            }
+        } catch (RuntimeException e) {
+            LOG.w(TAG, "Unable to release other prepared recorders", e);
+        }
+
         audio.startRecording(file);
     }
 
