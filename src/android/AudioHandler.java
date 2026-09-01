@@ -192,7 +192,10 @@ public class AudioHandler extends CordovaPlugin {
             return true;
         }
         else if (action.equals("prepareRecordingAudio")) {
-            this.prepareRecordingAudio(args.getString(0), args.getString(1));
+            // Stripped exactly as `create` and the record path do: a `file://` prefix that survives
+            // to `moveFile` is not recognised as an absolute path and the recording never lands.
+            this.prepareRecordingAudio(
+                args.getString(0), FileHelper.stripFileProtocol(args.getString(1)));
         }
         else if (action.equals("getCurrentLevelAudio")) {
             float f = this.getCurrentLevelAudio(args.getString(0));

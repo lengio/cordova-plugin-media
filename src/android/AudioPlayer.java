@@ -218,6 +218,10 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
             sendErrorStatus(MEDIA_ERR_ABORTED);
             break;
         case NONE:
+            // Always take the destination from the caller that is actually starting the recording.
+            // A recorder readied earlier skips the rest of `prepareRecording`, so without this the
+            // path it was prepared with wins, and `moveFile` writes the result somewhere else.
+            this.audioFile = file;
             this.prepareRecording(file);
             if (this.recorderPrepared && startPreparedRecorder()) {
                 this.setState(STATE.MEDIA_RUNNING);
@@ -454,12 +458,22 @@ public class AudioPlayer implements OnCompletionListener, OnPreparedListener, On
     public void moveFile(String file) {
         /* this is a hack to save the file as the specified name */
 
+        // A `file://` destination would not be seen as absolute below, and would be turned into a
+        // path inside the cache directory instead. The recording would then never reach the file
+        // the web layer goes on to read, which is an empty file rather than an obvious failure.
+        file = FileHelper.stripFileProtocol(file);
+
         if (!file.startsWith("/")) {
             file = createAudioFilePath(file);
         }
 
         int size = this.tempFiles.size();
         LOG.d(LOG_TAG, "size = " + size);
+
+        if (size == 0) {
+            LOG.e(LOG_TAG, "No recorded file to move to " + file + "; it will be left empty");
+            return;
+        }
 
         // only one file so just copy it
         if (size == 1) {
